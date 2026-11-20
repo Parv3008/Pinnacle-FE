@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -9,6 +9,7 @@ import DatePicker from '../../../components/common/DatePicker.jsx';
 import Textarea from '../../../components/common/Textarea.jsx';
 import RoleSelect from '../../../components/common/RoleSelect.jsx';
 import Button from '../../../components/common/Button.jsx';
+import { candidateService } from '../../../services/candidate.service.js';
 import {
   CANDIDATE_CALL_STATUSES,
   SALARY_RANGE_OPTIONS,
@@ -55,9 +56,14 @@ const optionalDate = z.preprocess((value) => {
   return value;
 }, z.union([z.null(), z.string()]));
 
+const digitsOnly = (value = '') => String(value).replace(/\D/g, '');
+
 const schema = z.object({
   fullName: z.string().min(1, 'Name is required'),
-  mobileNumber: z.string().min(10, 'Valid number is required'),
+  mobileNumber: z
+    .string()
+    .min(10, 'Valid number is required')
+    .regex(/^[0-9+\-\s()]{10,15}$/, 'Invalid mobile number'),
   currentRole: z.string().min(1, 'Current role is required'),
   experience: z.coerce.number().int().min(0).max(10),
   currentSalary: optionalSalary,
@@ -105,20 +111,39 @@ const nearestNoticePeriod = (value) => {
   return String(closest);
 };
 
-export default function CandidateForm({ open, onClose, initialData, onSubmit, loading }) {
+export default function CandidateForm({
+  open,
+  onClose,
+  initialData,
+  onSubmit,
+  loading,
+  serverError = '',
+  fieldErrors = {},
+}) {
   const {
     register,
     control,
     handleSubmit,
     reset,
+    setError,
+    clearErrors,
+    watch,
+    getValues,
     formState: { errors },
   } = useForm({
     resolver: zodResolver(schema),
     defaultValues: defaults,
   });
 
+  const [checkingMobile, setCheckingMobile] = useState(false);
+  const [existingCandidate, setExistingCandidate] = useState(null);
+  const mobileCheckSeq = useRef(0);
+  const mobileNumber = watch('mobileNumber');
+
   useEffect(() => {
     if (!open) return;
+    setExistingCandidate(null);
+    mobileCheckSeq.current += 1;
     reset(
       initialData
         ? {
@@ -144,7 +169,84 @@ export default function CandidateForm({ open, onClose, initialData, onSubmit, lo
     );
   }, [open, initialData, reset]);
 
-  const submit = handleSubmit((values) => {
+  useEffect(() => {
+    if (fieldErrors?.mobileNumber) {
+      setError('mobileNumber', { type: 'server', message: fieldErrors.mobileNumber });
+    }
+  }, [fieldErrors, setError]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const digits = digitsOnly(mobileNumber);
+    if (digits.length < 10) {
+      setExistingCandidate(null);
+      if (errors.mobileNumber?.type === 'duplicate') {
+        clearErrors('mobileNumber');
+      }
+      return undefined;
+    }
+
+    const seq = ++mobileCheckSeq.current;
+    const timer = setTimeout(async () => {
+      setCheckingMobile(true);
+      try {
+        const result = await candidateService.checkMobile(mobileNumber, initialData?._id);
+        if (seq !== mobileCheckSeq.current) return;
+
+        if (result?.exists && result.candidate) {
+          setExistingCandidate(result.candidate);
+          setError('mobileNumber', {
+            type: 'duplicate',
+            message: `Candidate already exists (${result.candidate.candidateCode} - ${result.candidate.fullName})`,
+          });
+        } else {
+          setExistingCandidate(null);
+          if (errors.mobileNumber?.type === 'duplicate') {
+            clearErrors('mobileNumber');
+          }
+        }
+      } catch {
+        if (seq !== mobileCheckSeq.current) return;
+        // Keep local validation; create/update API still enforces uniqueness.
+      } finally {
+        if (seq === mobileCheckSeq.current) setCheckingMobile(false);
+      }
+    }, 400);
+
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-check when mobile changes
+  }, [mobileNumber, open, initialData?._id]);
+
+  const verifyMobileBeforeSubmit = async (value) => {
+    const digits = digitsOnly(value);
+    if (digits.length < 10) return false;
+
+    setCheckingMobile(true);
+    try {
+      const result = await candidateService.checkMobile(value, initialData?._id);
+      if (result?.exists && result.candidate) {
+        setExistingCandidate(result.candidate);
+        setError('mobileNumber', {
+          type: 'duplicate',
+          message: `Candidate already exists (${result.candidate.candidateCode} - ${result.candidate.fullName})`,
+        });
+        return false;
+      }
+      setExistingCandidate(null);
+      if (errors.mobileNumber?.type === 'duplicate') clearErrors('mobileNumber');
+      return true;
+    } catch {
+      return true;
+    } finally {
+      setCheckingMobile(false);
+    }
+  };
+
+  const submit = handleSubmit(async (values) => {
+    const ok = await verifyMobileBeforeSubmit(values.mobileNumber || getValues('mobileNumber'));
+    if (!ok) return;
+
     const payload = {
       ...values,
       callStatus: values.callStatus || '',
@@ -154,6 +256,15 @@ export default function CandidateForm({ open, onClose, initialData, onSubmit, lo
     return onSubmit?.(payload);
   });
 
+  const mobileError = errors.mobileNumber?.message;
+  const mobileHelper = checkingMobile
+    ? 'Checking if this number already exists…'
+    : existingCandidate
+      ? undefined
+      : digitsOnly(mobileNumber).length >= 10
+        ? 'Number is available'
+        : undefined;
+
   return (
     <Modal
       open={open}
@@ -162,22 +273,32 @@ export default function CandidateForm({ open, onClose, initialData, onSubmit, lo
       size="lg"
       footer={
         <>
-          <Button variant="secondary" onClick={onClose} disabled={loading}>
+          <Button variant="secondary" onClick={onClose} disabled={loading || checkingMobile}>
             Cancel
           </Button>
-          <Button loading={loading} onClick={submit}>
+          <Button
+            loading={loading || checkingMobile}
+            onClick={submit}
+            disabled={Boolean(existingCandidate)}
+          >
             {initialData ? 'Update' : 'Create'}
           </Button>
         </>
       }
     >
+      {serverError ? (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {serverError}
+        </div>
+      ) : null}
       <form className="grid gap-4 sm:grid-cols-2" onSubmit={submit}>
         <div className="sm:col-span-2">
           <Input label="Name *" error={errors.fullName?.message} {...register('fullName')} />
         </div>
         <Input
           label="Number *"
-          error={errors.mobileNumber?.message}
+          error={mobileError}
+          helperText={!mobileError ? mobileHelper : undefined}
           {...register('mobileNumber')}
         />
         <Controller

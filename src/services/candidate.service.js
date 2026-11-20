@@ -6,9 +6,9 @@ export const candidateService = {
     const { data } = await api.get('/candidates', { params: buildQueryParams(params) });
     return { data: data.data, pagination: data.pagination };
   },
-  checkDuplicate: async (mobile) => {
-    const { data } = await api.get('/candidates', {
-      params: { checkDuplicate: 'true', mobile },
+  checkMobile: async (mobile, excludeId) => {
+    const { data } = await api.get('/candidates/check-mobile', {
+      params: buildQueryParams({ mobile, excludeId }),
     });
     return data.data;
   },

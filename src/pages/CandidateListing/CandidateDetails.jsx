@@ -19,7 +19,7 @@ import {
 import CandidateForm from './forms/CandidateForm.jsx';
 import { useCandidate, useCandidateMutations } from '../../hooks/useCandidates.js';
 import { formatCurrency, formatDate, formatSalaryRange } from '../../utils/formatters.js';
-import { getErrorMessage } from '../../utils/helpers.js';
+import { getErrorMessage, getFieldErrors } from '../../utils/helpers.js';
 
 const experienceLabel = (value) =>
   Number(value) === 0 ? 'Fresher' : `${value ?? 0} years`;
@@ -29,6 +29,7 @@ export default function CandidateDetails() {
   const navigate = useNavigate();
   const [editOpen, setEditOpen] = useState(false);
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({});
 
   const { data: candidate, isLoading, isError, error: queryError } = useCandidate(candidateId);
   const { update } = useCandidateMutations();
@@ -224,15 +225,24 @@ export default function CandidateDetails() {
 
       <CandidateForm
         open={editOpen}
-        onClose={() => setEditOpen(false)}
+        onClose={() => {
+          setEditOpen(false);
+          setError('');
+          setFieldErrors({});
+        }}
         initialData={candidate}
         loading={update.isPending}
+        serverError={error}
+        fieldErrors={fieldErrors}
         onSubmit={async (values) => {
+          setError('');
+          setFieldErrors({});
           try {
             await update.mutateAsync({ id: candidateId, payload: values });
             setEditOpen(false);
           } catch (err) {
             setError(getErrorMessage(err));
+            setFieldErrors(getFieldErrors(err));
           }
         }}
       />

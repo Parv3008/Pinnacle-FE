@@ -12,7 +12,7 @@ import CandidateForm from './forms/CandidateForm.jsx';
 import { useCandidates, useCandidateMutations } from '../../hooks/useCandidates.js';
 import { candidateService } from '../../services/candidate.service.js';
 import { formatDate } from '../../utils/formatters.js';
-import { getErrorMessage } from '../../utils/helpers.js';
+import { getErrorMessage, getFieldErrors } from '../../utils/helpers.js';
 import {
   CANDIDATE_CALL_STATUSES,
   CANDIDATE_CALLERS,
@@ -34,6 +34,7 @@ export default function CandidateListing() {
   const [editing, setEditing] = useState(null);
   const [archiveTarget, setArchiveTarget] = useState(null);
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({});
 
   const params = useMemo(
     () => ({ page, limit: 10, search, calledBy, callStatus, followUpFilter }),
@@ -84,6 +85,8 @@ export default function CandidateListing() {
             title="Edit"
             onClick={() => {
               setEditing(row);
+              setError('');
+              setFieldErrors({});
               setFormOpen(true);
             }}
           >
@@ -104,6 +107,7 @@ export default function CandidateListing() {
 
   const handleSubmit = async (values) => {
     setError('');
+    setFieldErrors({});
     try {
       if (editing) {
         await update.mutateAsync({ id: editing._id, payload: values });
@@ -114,6 +118,7 @@ export default function CandidateListing() {
       setEditing(null);
     } catch (err) {
       setError(getErrorMessage(err));
+      setFieldErrors(getFieldErrors(err));
     }
   };
 
@@ -132,6 +137,8 @@ export default function CandidateListing() {
             <Button
               onClick={() => {
                 setEditing(null);
+                setError('');
+                setFieldErrors({});
                 setFormOpen(true);
               }}
             >
@@ -208,6 +215,8 @@ export default function CandidateListing() {
         emptyActionLabel="Add Candidate"
         onEmptyAction={() => {
           setEditing(null);
+          setError('');
+          setFieldErrors({});
           setFormOpen(true);
         }}
       />
@@ -217,10 +226,14 @@ export default function CandidateListing() {
         onClose={() => {
           setFormOpen(false);
           setEditing(null);
+          setError('');
+          setFieldErrors({});
         }}
         initialData={editing}
         onSubmit={handleSubmit}
         loading={create.isPending || update.isPending}
+        serverError={error}
+        fieldErrors={fieldErrors}
       />
 
       <ConfirmDialog
