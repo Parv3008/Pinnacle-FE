@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { authService } from '../services/auth.service.js';
+import { tokenStorage } from '../services/api.js';
 import { getErrorMessage } from '../utils/helpers.js';
 
 const AuthContext = createContext(null);
@@ -29,6 +30,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     const handleUnauthorized = () => {
+      tokenStorage.clear();
       queryClient.setQueryData(['auth', 'me'], null);
       queryClient.clear();
     };
